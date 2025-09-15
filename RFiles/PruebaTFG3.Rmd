@@ -1,0 +1,150 @@
+---
+title: "PruebaTFG3"
+author: "Joan Miquel Rubí Garcías"
+date: "2025-06-01"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tinytex)
+library(stringi)
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(tidyverse)
+
+library(cluster)
+library(stringi)
+
+```
+
+```{r, include=FALSE}
+df = read_csv("C:\\Users\\joanm\\OneDrive\\Documentos\\TFG_Tablas\\Big_5_European_Leagues_all_stats_LanusStats")
+df <- read_csv("df_limpio.csv", locale = locale(encoding = "ASCII"))
+```
+
+```{r}
+head(df,5)
+colnames(df)
+raillo = df[df$Player == "Antonio Raillo", ]
+raillo
+defensas = df[grepl("DF", df$stats_Pos, ignore.case = TRUE),] # La funcion grepl actua como include()
+head(defensas)
+```
+Vamos a limpiar el data_frame eliminando las columnas repetidas (Cada tabla tiene edad, posición,...)
+```{r}
+cols_a_eliminar <- grep("(_Age|_Born|_Nation|_Pos|_Squad|_Comp)$", names(df), value = TRUE)
+cols_a_eliminar <- cols_a_eliminar[!grepl("^stats", cols_a_eliminar, ignore.case = TRUE)]
+df_limpio <- df  # copia
+for (col in cols_a_eliminar) {
+  df_limpio[[col]] <- NULL
+}
+head(df_limpio)  
+```
+
+## Vamos por el ACP
+
+```{r}
+# 1. Filtramos solo columnas numéricas y sin NA en exceso
+df_numeric <- df_limpio %>%
+  select(where(is.numeric)) %>%
+  select_if(~ mean(!is.na(.)) > 0.95)  # Elimina columnas con >5% de NAs
+
+# Opcional: eliminar variables perfectamente correlacionadas o con varianza cero
+df_clean <- df_numeric %>%
+  dplyr::select(where(~ sd(., na.rm = TRUE) > 0)) %>% 
+  drop_na()
+
+# 2. Aplicamos PCA
+res_pca <- PCA(df_clean, scale.unit = TRUE, ncp = 10, graph = FALSE)
+fviz_eig(res_pca)  
+```
+# Luego el k-medias
+
+```{r}
+# Usamos los primeros componentes (por ejemplo, 5)
+pca_coords <- as.data.frame(res_pca$ind$coord[, 1:5])
+
+# K-means con un número arbitrario (e.g., 4)
+set.seed(123)
+kmeans_res <- kmeans(pca_coords, centers = 4, nstart = 25)
+
+# Añadimos la asignación al dataframe
+df_clusters <- df %>%
+  filter(complete.cases(df_clean)) %>%
+  mutate(cluster = kmeans_res$cluster)
+
+```
+
+
+```{r}
+# Ubicamos a Raíllo en el mismo espacio PCA
+raillo_idx <- which(df$Player == "Antonio Raillo")
+raillo_pca <- pca_coords[raillo_idx, ]
+
+# Distancia Euclídea a todos los demás
+dists <- sqrt(rowSums((pca_coords - matrix(rep(as.numeric(raillo_pca), nrow(pca_coords)),
+                                           ncol = 5, byrow = TRUE))^2))
+
+# Top 10 más cercanos
+closest_players <- df %>%
+  filter(complete.cases(df_clean)) %>%
+  mutate(dist_to_raillo = dists) %>%
+  arrange(dist_to_raillo) %>%
+  select(Player, stats_Squad, dist_to_raillo) %>%
+  slice(1:10)
+print(closest_players)
+```
+
+```{r}
+
+sil <- silhouette(kmeans_res$cluster, dist(pca_coords))
+fviz_silhouette(sil)
+
+# Silueta de Raíllo
+raillo_sil <- sil[raillo_idx, ]
+print(raillo_sil)
+```
+
+```{r}
+# Agregamos la info del PCA y distancias
+df_plot <- df %>%
+  filter(complete.cases(df_clean)) %>%
+  mutate(Dim1 = pca_coords$Dim.1,
+         Dim2 = pca_coords$Dim.2,
+         dist_to_raillo = dists)
+
+# Índice de Raíllo
+raillo_row <- df_plot %>% filter(Player == "Antonio Raíllo")
+
+# Top 10 más cercanos (incluyendo Raíllo)
+closest_ids <- df_plot %>%
+  arrange(dist_to_raillo) %>%
+  slice(1:10) %>%
+  pull(Player)
+
+# Etiqueta si es Raíllo, cercano, o "otro"
+df_plot <- df_plot %>%
+  mutate(group = case_when(
+    Player == "Antonio Raillo" ~ "Raillo",
+    Player %in% closest_ids ~ "Cercano",
+    TRUE ~ "Otro"
+  ))
+
+#options(encoding = "UTF-8")
+
+#df_plot$Player_clean <- stri_trans_general(df_plot$Player, "UTF-8")
+# Colores por grupo
+ggplot(df_plot, aes(x = Dim1, y = Dim2)) +
+  geom_point(aes(color = group), alpha = 0.6, size = 2) +
+  scale_color_manual(values = c("Raillo" = "red", "Cercano" = "blue", "Otro" = "gray80")) +
+  geom_text(data = df_plot %>% filter(Player %in% closest_ids),
+            aes(label = Player),
+            size = 3, vjust = -0.5, check_overlap = TRUE) +
+  theme_minimal() +
+  labs(title = "PCA de jugadores",
+       subtitle = "Antonio Raíllo y los más similares en el espacio de componentes",
+       x = "PC1", y = "PC2", color = "Grupo")
+```
+
