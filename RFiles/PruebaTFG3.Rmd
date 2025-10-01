@@ -13,15 +13,13 @@ library(dplyr)
 library(FactoMineR)
 library(factoextra)
 library(tidyverse)
-
 library(cluster)
-library(stringi)
 
 ```
 
 ```{r, include=FALSE}
 df = read_csv("C:\\Users\\joanm\\OneDrive\\Documentos\\TFG_Tablas\\Big_5_European_Leagues_all_stats_LanusStats")
-df <- read_csv("df_limpio.csv", locale = locale(encoding = "ASCII"))
+df <- read_csv("C:\\TFG\\Football-Data\\Data\\df_limpio.csv", locale = locale(encoding = "ASCII"))
 ```
 
 ```{r}
@@ -40,7 +38,7 @@ df_limpio <- df  # copia
 for (col in cols_a_eliminar) {
   df_limpio[[col]] <- NULL
 }
-head(df_limpio)  
+head(df_limpio,15)  
 ```
 
 ## Vamos por el ACP
